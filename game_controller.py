@@ -1,9 +1,11 @@
-# game_controller.py (rebuilding gameplay step-by-step)
+# game_controller.py (monster badass final version)
 
 import redis
 import random
 import json
 from response_keyword_abstraction import extract_keywords, normalize_with_custom_synonyms
+from structured_grading import generate_summary_text, score_similarity, llm_score_player_response
+from player_feedback import generate_feedback
 
 # Connect to Redis
 r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
@@ -21,7 +23,7 @@ def fetch_random_ticket():
 
 def main_loop():
     print("\n🚀 Welcome to Canonical Extraction Testing Mode")
-    
+
     while True:
         ticket = fetch_random_ticket()
         if not ticket:
@@ -48,12 +50,51 @@ def main_loop():
         player_extracted = extract_keywords(diagnosis, debug=True)
         player_normalized = normalize_with_custom_synonyms(player_extracted)
 
-        # 📋 Display both JSON views cleanly
-        print("\n📈 Canonical Normalized Root Cause (Structured):")
-        print(json.dumps(expected_normalized, indent=2))
+        # 📋 Display Side-by-Side Comparison
+        fields = ["technical_concepts", "verbs_actions", "specific_details", "location", "problem", "root cause"]
 
-        print("\n📈 Canonical Normalized Player Diagnosis (Structured):")
-        print(json.dumps(player_normalized, indent=2))
+        print("\n📝 Canonical Extraction Comparison:\n")
+        print(f"{'Field':<22} | {'Canonical Root Cause':<40} | {'Player Diagnosis':<40}")
+        print("-" * 110)
+
+        for field in fields:
+            canonical_value = expected_normalized.get(field, [])
+            player_value = player_normalized.get(field, [])
+
+            # Convert lists to short readable strings
+            canonical_str = ", ".join(canonical_value) if isinstance(canonical_value, list) else str(canonical_value)
+            player_str = ", ".join(player_value) if isinstance(player_value, list) else str(player_value)
+
+            print(f"{field:<22} | {canonical_str:<40} | {player_str:<40}")
+
+        print("-" * 110)
+
+        # 🧠 Semantic similarity scoring
+        expected_summary = generate_summary_text(expected_normalized)
+        player_summary = generate_summary_text(player_normalized)
+        semantic_score = score_similarity(expected_summary, player_summary)
+
+        # 🛠 Strict structured field-by-field scoring
+
+        expected_summary = generate_summary_text(expected_normalized)
+        player_summary = generate_summary_text(player_normalized)
+
+        semantic_score = score_similarity(expected_summary, player_summary)
+
+        strict_score, reason = llm_score_player_response(expected_normalized, player_normalized, debug=True)
+
+        print(f"\n🏆 Semantic Similarity Score: {semantic_score} / 100")
+        print(f"🏆 LLM Structured Score: {strict_score} / 100")
+        print(f"\n💬 LLM Feedback:\n{reason}")
+
+        # 🧠 Generate LLM feedback
+        feedback = generate_feedback(expected_normalized, player_normalized)
+
+        # 🏆 Show all results
+        print(f"\n🏆 Semantic Similarity Score: {semantic_score} / 100")
+        print(f"🏆 LLM Structured Score: {strict_score} / 100")
+
+        print(f"\n💬 LLM Feedback:\n{feedback}")
 
         # Ask to continue
         again = input("\n🔁 Grab another ticket? (y/n): ").strip().lower()

@@ -1,49 +1,94 @@
 # structured_grading.py
 
-from response_keyword_abstraction import normalize_with_custom_synonyms
+import requests
+import json
+from sentence_transformers import SentenceTransformer, util
 
-def grade_response(normalized_keywords, expected_root_cause, debug=False):
+# Initialize Sentence Transformer once
+model = SentenceTransformer('all-MiniLM-L6-v2')
+
+# Ollama local LLM setup
+OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_MODEL = "mistral"
+
+# --- Scoring Functions ---
+
+def generate_summary_text(normalized_keywords):
     """
-    Grade player response by normalizing both the player response and
-    the expected root cause for better matching.
+    Generate a lightweight text summary from normalized canonical fields.
     """
-    expected_raw = expected_root_cause.lower().strip()
+    parts = []
 
-    # Normalize expected root cause into the same structure
-    expected_normalized = normalize_with_custom_synonyms({
-        "technical_concepts": [expected_raw],
-        "verbs_actions": [],
-        "specific_details": [],
-        "location": [],
-        "problem": []
-    })
+    for field in ["technical_concepts", "verbs_actions", "specific_details", "location", "problem", "root cause"]:
+        entries = normalized_keywords.get(field, [])
+        if entries:
+            parts.append(", ".join(entries))
 
-    # Combine normalized fields
-    combined_expected_text = " ".join(expected_normalized.get("technical_concepts", []) +
-                                      expected_normalized.get("problem", [])).lower()
+    return " | ".join(parts)
 
-    combined_player_text = " ".join(normalized_keywords.get("technical_concepts", []) +
-                                    normalized_keywords.get("problem", [])).lower()
+def score_similarity(expected_summary, player_summary):
+    """
+    Score semantic similarity between expected and player summaries.
+    """
+    expected_embedding = model.encode(expected_summary, normalize_embeddings=True)
+    player_embedding = model.encode(player_summary, normalize_embeddings=True)
+    similarity = util.cos_sim(expected_embedding, player_embedding)[0][0].item()
 
-    match_found = combined_expected_text in combined_player_text or combined_player_text in combined_expected_text
+    scaled_score = int(similarity * 100)
+    return scaled_score
 
-    score = 100 if match_found else 0
+def llm_score_player_response(expected_normalized, player_normalized, debug=False):
+    """
+    Use LLM to strictly and fairly score the player's answer.
+    """
 
-    if debug:
-        print("\n[DEBUG] Grading Breakdown:")
-        print(f"- Expected Root Cause (Raw): {expected_raw}")
-        print(f"- Expected Normalized Words: {expected_normalized}")
-        print(f"- Combined Expected Text: '{combined_expected_text}'\n")
+    system_prompt = """
+You are a network engineering instructor.
 
-        print(f"- Player Normalized Keywords: {normalized_keywords}")
-        print(f"- Combined Player Text: '{combined_player_text}'\n")
+Your job is to evaluate a student's troubleshooting diagnosis for a networking issue.
 
-        print(f"[MATCHING LOGIC]")
-        if match_found:
-            print(f"✅ MATCH FOUND: Player keywords matched expected normalized root cause.")
-        else:
-            print(f"❌ NO MATCH: Player keywords did not match expected normalized root cause.")
+Strict rules:
+- Award FULL CREDIT (100 points) if the student correctly identifies BOTH:
+  1. The main Technical Concept (e.g., Spanning Tree Protocol, BGP, PSK)
+  2. The main Issue or Problem (e.g., disabled, incorrect, high CPU)
 
-        print(f"Score Awarded: {score}\n")
+- Award ZERO CREDIT (0 points) if the student identifies ONLY the Technical Concept but misses the Problem.
 
-    return score
+- Award PARTIAL CREDIT (between 25 and 70 points depending on how close they are) if the student identifies the correct Technical Concept and Problem but misses Specific Details (like VLAN IDs, speeds, or locations).
+
+Tone:
+You are a tough but fair teacher. Be encouraging but strict. Giving students too many points would hurt their learning. Reward success accurately.
+
+Respond ONLY in this JSON format:
+{
+  "score": (integer between 0 and 100),
+  "reason": (short explanation why this score was awarded)
+}
+"""
+
+    payload = {
+        "model": OLLAMA_MODEL,
+        "prompt": f"{system_prompt}\n\nCanonical Root Cause (structured JSON):\n{json.dumps(expected_normalized, indent=2)}\n\nPlayer Diagnosis (structured JSON):\n{json.dumps(player_normalized, indent=2)}",
+        "stream": False
+    }
+
+    try:
+        response = requests.post(OLLAMA_URL, json=payload, timeout=30)
+        if response.status_code != 200:
+            print(f"⚠️ LLM scoring request failed: {response.text}")
+            return 0, "LLM Error"
+
+        raw_response = response.json().get("response", "").strip()
+
+        if debug:
+            print("\n[DEBUG] Raw LLM Scoring Response:")
+            print(raw_response)
+
+        parsed = json.loads(raw_response)
+        return parsed.get("score", 0), parsed.get("reason", "No reason provided.")
+
+    except Exception as e:
+        print(f"⚠️ Exception during LLM scoring: {e}")
+        return 0, "LLM Exception"
+
+
