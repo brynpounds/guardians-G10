@@ -10,6 +10,53 @@ r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
 
 DEBUG_MODE = True
 
+UNSTRUCTURED_ISSUES = {
+    "2001": {
+        "description": "TALOS is not configured at Site9"
+    },
+    "2002": {
+        "description": "TALOS is not configured at Site10"
+    },
+    "2003": {
+        "description": "Umbrella is not configured at Site10"
+    },
+    "2004": {
+        "description": "You are missing the license for a MS120-8 switch"
+    }
+}
+
+def load_unstructured_issues():
+    issue_list_key = "unstructured_issue_list"
+
+    if DEBUG_MODE:
+        print("\n[INIT] Checking for unstructured issues...")
+
+    if r.llen(issue_list_key) == 0:
+        if DEBUG_MODE:
+            print("[INIT] Loading unstructured issues...")
+
+        for issue_id, issue_data in UNSTRUCTURED_ISSUES.items():
+            issue_key = f"unstructured:{issue_id}"
+            description = issue_data["description"]
+
+            # 🔥 Canonicalize it!
+            extracted = extract_keywords(description, debug=False)
+            normalized = normalize_with_custom_synonyms(extracted)
+
+            r.hset(issue_key, mapping={
+                "description": description,
+                "canonical_normalized": json.dumps(normalized)
+            })
+
+            r.rpush(issue_list_key, issue_id)
+
+        if DEBUG_MODE:
+            print(f"[INIT] Loaded {len(UNSTRUCTURED_ISSUES)} unstructured issues.")
+    else:
+        if DEBUG_MODE:
+            print(f"[INIT] {r.llen(issue_list_key)} unstructured issues already exist.")
+
+
 CANONICAL_EXTRACTION_PROMPT = """You are a network troubleshooting assistant.
 
 Given a diagnostic sentence and a list of Canonical Technical Terms, your job is to:
@@ -102,6 +149,7 @@ def run_initialization():
     print("\n🚀 Initializing Game Environment...")
 #    store_canonical_prompt()
     load_trouble_tickets()
+    load_unstructured_issues()
     print("\n✅ Initialization Complete.")
 
 if __name__ == "__main__":

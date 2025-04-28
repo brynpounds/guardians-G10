@@ -1,43 +1,43 @@
-# game_controller.py (monster badass final version)
+# game_controller.py (switching to Unstructured Testing Mode)
 
 import redis
 import random
 import json
 from response_keyword_abstraction import extract_keywords, normalize_with_custom_synonyms
-from structured_grading import generate_summary_text, score_similarity, llm_score_player_response
-from player_feedback import generate_feedback
+#from structured_grading import generate_summary_text, score_similarity, grade_response
+from unstructured_grading import summarize_keywords, evaluate_unstructured
 
 # Connect to Redis
 r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
 
-def fetch_random_ticket():
-    ticket_ids = r.lrange("ticket_list", 0, -1)
-    if not ticket_ids:
-        print("❌ No tickets found in Redis.")
+def fetch_random_unstructured_issue():
+    issue_ids = r.lrange("unstructured_issue_list", 0, -1)
+    if not issue_ids:
+        print("❌ No unstructured issues found in Redis.")
         return None
 
-    random_ticket_id = random.choice(ticket_ids)
-    ticket_key = f"ticket:{random_ticket_id}"
-    ticket_data = r.hgetall(ticket_key)
-    return ticket_data
+    random_issue_id = random.choice(issue_ids)
+    issue_key = f"unstructured:{random_issue_id}"
+    issue_data = r.hgetall(issue_key)
+    return issue_data
 
 def main_loop():
-    print("\n🚀 Welcome to Canonical Extraction Testing Mode")
+    print("\n🚀 Welcome to Unstructured Canonical Extraction Testing Mode")
 
     while True:
-        ticket = fetch_random_ticket()
-        if not ticket:
-            print("❌ No ticket available.")
+        issue = fetch_random_unstructured_issue()
+        if not issue:
+            print("❌ No unstructured issue available.")
             break
 
-        print("\n🛠️ Trouble Ticket (Player-Facing Description):")
-        print(ticket['description'])
+        print("\n🛠️ Unstructured Network Issue (Player-Facing Description):")
+        print(issue['description'])
 
         # Load expected Canonical normalized root cause
         try:
-            expected_normalized = json.loads(ticket['root_cause_normalized'])
+            expected_normalized = json.loads(issue['canonical_normalized'])
         except Exception as e:
-            print(f"⚠️ Error decoding ticket normalized root cause: {e}")
+            print(f"⚠️ Error decoding unstructured normalized root cause: {e}")
             continue
 
         diagnosis = input("\n💬 Enter your troubleshooting diagnosis: ").strip()
@@ -67,37 +67,37 @@ def main_loop():
 
             print(f"{field:<22} | {canonical_str:<40} | {player_str:<40}")
 
+        # 🧠 Summarize for scoring
+        expected_summary = summarize_keywords(expected_normalized)
+        player_summary = summarize_keywords(player_normalized)
+
+        # 🏆 Score it
+        score, feedback = evaluate_unstructured(expected_summary, player_summary)
+
+        # 🎯 Display results
+        print(f"\n🏆 Player Score: {score} / 100")
+        print("\n💬 LLM Feedback:")
+        print(feedback)
+
+
         print("-" * 110)
 
-        # 🧠 Semantic similarity scoring
-        expected_summary = generate_summary_text(expected_normalized)
-        player_summary = generate_summary_text(player_normalized)
-        semantic_score = score_similarity(expected_summary, player_summary)
-
-        # 🛠 Strict structured field-by-field scoring
-
-        expected_summary = generate_summary_text(expected_normalized)
-        player_summary = generate_summary_text(player_normalized)
-
-        semantic_score = score_similarity(expected_summary, player_summary)
-
-        strict_score, reason = llm_score_player_response(expected_normalized, player_normalized, debug=True)
-
-        print(f"\n🏆 Semantic Similarity Score: {semantic_score} / 100")
-        print(f"🏆 LLM Structured Score: {strict_score} / 100")
-        print(f"\n💬 LLM Feedback:\n{reason}")
-
-        # 🧠 Generate LLM feedback
-        feedback = generate_feedback(expected_normalized, player_normalized)
-
-        # 🏆 Show all results
-        print(f"\n🏆 Semantic Similarity Score: {semantic_score} / 100")
-        print(f"🏆 LLM Structured Score: {strict_score} / 100")
-
-        print(f"\n💬 LLM Feedback:\n{feedback}")
+        # ✏️ Commented out for now — save for structured mode later
+        #
+        # expected_summary = generate_summary_text(expected_normalized)
+        # player_summary = generate_summary_text(player_normalized)
+        #
+        # score = score_similarity(expected_summary, player_summary)
+        #
+        # structured_score, feedback = grade_response(expected_normalized, player_normalized, debug=True)
+        #
+        # print(f"\n🏆 Semantic Similarity Score: {score} / 100")
+        # print(f"🏆 Structured Field-by-Field Score: {structured_score} / 100")
+        # print("\n💬 LLM Feedback:")
+        # print(feedback)
 
         # Ask to continue
-        again = input("\n🔁 Grab another ticket? (y/n): ").strip().lower()
+        again = input("\n🔁 Grab another unstructured issue? (y/n): ").strip().lower()
         if again != 'y':
             break
 
